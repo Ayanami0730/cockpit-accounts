@@ -5,6 +5,7 @@ This is a macOS Apple Silicon preview. The owner requested safe-scope testing wi
 ## What was actually exercised
 
 - Downloaded the published 0.1.0 installer from GitHub and ran it with a temporary installation destination. The installed app had the expected version and identifier, executable permissions and a valid ad-hoc signature. A second install correctly refused to overwrite it.
+- After publishing 0.1.1, downloaded its tagged installer from GitHub again and executed it into a new temporary destination. The installer matched the reviewed script, installed version 0.1.1, and passed executable-permission and signature verification.
 - macOS security assessment rejected the unnotarized app, as expected. No Gatekeeper setting or quarantine protection was changed. This is not a clean-machine “no prompt” installation pass.
 - Started the downloaded app with an empty manager account store. Generated a Codex authorization URL without opening it, verified that the callback listener belonged to the test manager, then cancelled. The listener and pending file were removed, and no account was added.
 - Created two explicitly named, unauthenticated Claude test profiles; selected the next default; restarted only the test manager; verified that profiles and selection persisted. Profile directories were owner-only and contained no official credentials.
