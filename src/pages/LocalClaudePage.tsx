@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { AlertCircle, Check, ChevronDown, Clock3, ExternalLink, Archive, FolderOpen, Loader2, Monitor, Plus, RefreshCw, ShieldCheck, Terminal } from 'lucide-react';
-import { createLocalClaudeService } from '../services/localClaudeService';
+import { createLocalClaudeService, claudeDependencyMessage } from '../services/localClaudeService';
 import type { ClaudeAction, ClaudeOverview, ClaudePreflight, ClaudeProfile, ClaudeUsage, WindowUsage, ClaudeSession, ClaudeSessionInventory, ClaudeSessionSnapshot } from '../types/localClaude';
 import { CLAUDE_AUTO_REFRESH_MS, canAutoRefreshClaude, collectorStatus, collectClaudeReminders, formatMinorAmount, refreshRetryDelay, renewalDays, takeUnseenClaudeReminders, usageFreshness, usedPercent, windowExpired, sessionResumeBlockReason, formatSessionBytes, sessionActivityLabel } from '../utils/localClaudeReminders';
 import './LocalClaudePage.css';
@@ -117,13 +117,13 @@ export function LocalClaudePage({ readonly = false }: { readonly?: boolean }) {
     try {
       await task();
       if (mounted.current) { failures.current = 0; setRetryAction(null); setRetryAt(0); setAutoDeferred(false); }
-    } catch {
+    } catch (error) {
       if (mounted.current) {
         failures.current += 1;
         const after = Date.now() + refreshRetryDelay(failures.current);
         setRetryAt(after); setRetryAction(retry);
         nextAutoAt.current = Date.now() + CLAUDE_AUTO_REFRESH_MS;
-        setNotice({ kind: 'error', text: `${label}未完成。现有会话未被切换，请稍后重试。` });
+        setNotice({ kind: 'error', text: claudeDependencyMessage(error) ?? `${label}未完成。现有会话未被切换，请稍后重试。` });
       }
     } finally { busyRef.current = false; if (mounted.current) setBusy(null); }
   }, []);
@@ -180,8 +180,8 @@ export function LocalClaudePage({ readonly = false }: { readonly?: boolean }) {
         if (Array.isArray(saved)) shown.current = new Set(saved.filter((key): key is string => typeof key === 'string' && /^(quota|renewal):/.test(key) && key.length < 200).slice(-300));
       } catch { /* Do not persist account data as a fallback. */ }
     }
-    void service.list().then((next) => { if (!disposed) applyOverview(next); }).catch(() => {
-      if (!disposed) { setNotice({ kind: 'error', text: '暂时无法读取 Claude 账号。请确认本地服务可用后重试。' }); setRetryAction('load'); }
+    void service.list().then((next) => { if (!disposed) applyOverview(next); }).catch((error) => {
+      if (!disposed) { setNotice({ kind: 'error', text: claudeDependencyMessage(error) ?? '暂时无法读取 Claude 账号。请确认本地服务可用后重试。' }); setRetryAction('load'); }
     }).finally(() => { if (!disposed) setLoading(false); });
     const clock = window.setInterval(() => setNow(Date.now()), 1000);
     return () => { disposed = true; mounted.current = false; window.clearInterval(clock); };

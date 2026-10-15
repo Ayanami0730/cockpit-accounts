@@ -50,15 +50,7 @@ for profile in registry['profiles']:
 print(json.dumps({'profiles':profiles,'selectedProfileId':registry['selectedProfileId'],
     'desktopRunning':False,'codeProcessCount':0,'checkedAt':1,'warning':None}))
 "#);
-        let python = [
-            "/opt/homebrew/bin/python3",
-            "/usr/local/bin/python3",
-            "/usr/bin/python3",
-        ]
-        .into_iter()
-        .map(PathBuf::from)
-        .find(|p| p.is_file())
-        .unwrap();
+        let python = installed_python().expect("tests require an installed Python 3");
         Runner { python, script }
     }
     fn write_snapshot(&self, id: &str, signed_in: bool) {
@@ -402,4 +394,36 @@ fn claude_local_safe_bounded_runner_suppresses_failed_and_oversized_output() {
     let started = Instant::now();
     assert!(bounded_output(timeout, Duration::from_millis(80)).is_err());
     assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+#[test]
+fn python_discovery_rejects_system_launcher_and_aliases() {
+    let fixture = Fixture::new();
+    assert!(usable_python(Path::new("/usr/bin/python3")).is_none());
+    let alias = fixture.home.join("python3");
+    symlink("/usr/bin/python3", &alias).unwrap();
+    assert!(usable_python(&alias).is_none());
+}
+
+#[test]
+fn python_discovery_requires_executable_file() {
+    let fixture = Fixture::new();
+    let candidate = fixture.home.join("python3");
+    assert!(usable_python(&candidate).is_none());
+    fs::write(&candidate, b"#!/bin/sh\nexit 0\n").unwrap();
+    fs::set_permissions(&candidate, fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(usable_python(&candidate).is_none());
+    fs::set_permissions(&candidate, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(usable_python(&candidate), Some(fs::canonicalize(candidate).unwrap()));
+}
+
+#[test]
+fn python_discovery_never_executes_a_candidate() {
+    let fixture = Fixture::new();
+    let candidate = fixture.home.join("python3");
+    let marker = fixture.home.join("must-not-execute");
+    fs::write(&candidate, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
+    fs::set_permissions(&candidate, fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(usable_python(&candidate).is_some());
+    assert!(!marker.exists());
 }

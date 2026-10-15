@@ -258,6 +258,64 @@ class SwitchTests(unittest.TestCase):
         self.assertEqual(pty_run.call_args.args[:3], (self.policy.cli, self.sessions[0], self.cwd))
         self.assertNotIn("CLAUDE_USER_DATA_DIR", pty_run.call_args.args[3])
 
+    def test_zero_history_auto_verification_requires_desktop_login(self):
+        for sid in self.sessions:
+            (Path(self.source["configDir"]) / "projects/project" / (sid + ".jsonl")).unlink()
+        account, organization = str(uuid.uuid4()), str(uuid.uuid4())
+        self.write(Path(self.target["configDir"]) / ".claude.json", json.dumps({"oauthAccount": {
+            "accountUuid": account, "organizationUuid": organization, "emailAddress": "target@example.invalid"
+        }}).encode())
+        op = self.drive(self.prepare())
+        self.runner.observe_health(self.target, "success")
+        adapter = switch.Lifecycle(self.runner)
+        with mock.patch.object(self.lifecycle, "verify_identity", side_effect=adapter.verify_identity), \
+             mock.patch.object(self.lifecycle, "verify_sessions", side_effect=adapter.verify_sessions):
+            op = self.manager.act(op["id"], "verify_auto")
+            self.assertEqual(op["stage"], "awaiting_verification")
+            self.assertEqual(op["lastErrorCode"], "identity_unavailable")
+            self.assertIsNone(op["verifiedAt"])
+            self.assertEqual(self.selected(), self.source["id"])
+            self.write(Path(self.target["desktopDir"]) / "config.json",
+                       json.dumps({"lastKnownAccountUuid": account}).encode())
+            op = self.manager.act(op["id"], "verify_auto")
+        self.assertEqual(op["stage"], "complete")
+        self.assertEqual(op["verificationMode"], "official_local_metadata")
+        self.assertEqual(self.selected(), self.target["id"])
+        self.runner.run_bounded.assert_not_called()
+
+    def test_desktop_identity_mismatch_still_rejects_verification(self):
+        self.write(Path(self.target["configDir"]) / ".claude.json", json.dumps({"oauthAccount": {
+            "accountUuid": str(uuid.uuid4()), "organizationUuid": str(uuid.uuid4()),
+            "emailAddress": "target@example.invalid"
+        }}).encode())
+        self.write(Path(self.target["desktopDir"]) / "config.json",
+                   json.dumps({"lastKnownAccountUuid": str(uuid.uuid4())}).encode())
+        with self.assertRaises(safe.SafeError) as error:
+            switch.Lifecycle(self.runner).verify_identity(self.target)
+        self.assertEqual(error.exception.code, "identity_mismatch")
+        self.runner.run_bounded.assert_not_called()
+
+    def test_standard_profile_session_verification_uses_home_global_metadata(self):
+        account, organization = str(uuid.uuid4()), str(uuid.uuid4())
+        self.write(self.home / ".claude.json", json.dumps({"oauthAccount": {
+            "accountUuid": account, "organizationUuid": organization, "emailAddress": "source@example.invalid"
+        }}).encode())
+        # This is the custom-config location, not the standard CLI's global file.
+        self.write(Path(self.source["configDir"]) / ".claude.json", json.dumps({"oauthAccount": {
+            "accountUuid": str(uuid.uuid4()), "organizationUuid": str(uuid.uuid4())
+        }}).encode())
+        self.write(Path(self.source["desktopDir"]) / "config.json",
+                   json.dumps({"lastKnownAccountUuid": account}).encode())
+        root = Path(self.source["desktopDir"]) / "claude-code-sessions" / account / organization
+        for sid in self.sessions:
+            self.write(root / ("local_" + sid + ".json"),
+                       json.dumps({"cliSessionId": sid, "cwd": str(self.cwd)}).encode())
+        adapter = switch.Lifecycle(self.runner)
+        adapter.verify_identity(self.source)
+        self.assertTrue(adapter.verify_sessions(self.source,
+            [{"sessionId": sid, "cwd": str(self.cwd)} for sid in self.sessions]))
+        self.runner.run_bounded.assert_not_called()
+
     def test_registration_frontend_has_real_tty_streams_and_never_echoes_output(self):
         cli = self.home / "fake-tty-cli"
         cli.write_text("#!" + sys.executable + "\nimport os,sys\nassert os.isatty(0) and os.isatty(1) and os.isatty(2)\nassert sys.argv[1:3] == ['--desktop','--resume']\nprint('SECRET_TTY_OUTPUT')\n")

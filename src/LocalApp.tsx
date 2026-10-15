@@ -21,10 +21,14 @@ const CursorAccountsPage = lazy(() =>
 export default function LocalApp() {
   const [page, setPage] = useState<'codex' | 'cursor' | 'claude' | 'settings'>('codex');
   const [codexVisited, setCodexVisited] = useState(false);
-  const [version, setVersion] = useState('0.1.0');
+  const [claudeVisited, setClaudeVisited] = useState(false);
+  const [version, setVersion] = useState('0.1.1');
   const [pathSettingsRequest, setPathSettingsRequest] = useState(0);
 
-  useEffect(() => { if (page === 'codex') setCodexVisited(true); }, [page]);
+  useEffect(() => {
+    if (page === 'codex') setCodexVisited(true);
+    if (page === 'claude') setClaudeVisited(true);
+  }, [page]);
 
   useEffect(() => {
     document.title = 'Cockpit Accounts';
@@ -94,7 +98,7 @@ export default function LocalApp() {
           {codexVisited && <LocalCodexPage />}
         </div>
         <div hidden={page !== 'claude'}>
-          <LocalClaudePage />
+          {claudeVisited && <LocalClaudePage />}
         </div>
         {page === 'codex' || page === 'claude' ? null : page === 'cursor' ? (
           <Suspense fallback={<div className="loading-state">正在加载 Cursor 账号…</div>}>

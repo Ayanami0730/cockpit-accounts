@@ -2,7 +2,9 @@ use base64::Engine;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::future::Future;
 use std::sync::{Arc, Mutex};
+use tokio::sync::Notify;
 
 use crate::models::cursor::CursorImportPayload;
 use crate::modules::logger;
@@ -40,10 +42,88 @@ struct PollResponse {
 
 lazy_static::lazy_static! {
     static ref PENDING_OAUTH_STATE: Arc<Mutex<Option<PendingOAuthState>>> = Arc::new(Mutex::new(None));
+    static ref OAUTH_STATE_CHANGED: Notify = Notify::new();
 }
 
 fn now_timestamp() -> i64 {
     chrono::Utc::now().timestamp()
+}
+
+fn require_active_state(state: Option<&PendingOAuthState>, login_id: &str) -> Result<(), String> {
+    let state = state.ok_or_else(|| "登录已取消或已结束".to_string())?;
+    if state.login_id != login_id {
+        return Err("登录流程已被新的授权替换".to_string());
+    }
+    if state.cancelled {
+        return Err("登录已取消".to_string());
+    }
+    if now_timestamp() >= state.expires_at {
+        return Err("登录会话已过期".to_string());
+    }
+    Ok(())
+}
+
+fn active_state(
+    pending: &Mutex<Option<PendingOAuthState>>,
+    login_id: &str,
+) -> Result<PendingOAuthState, String> {
+    let state = pending
+        .lock()
+        .map_err(|_| "获取 OAuth 状态锁失败".to_string())?;
+    require_active_state(state.as_ref(), login_id)?;
+    state
+        .clone()
+        .ok_or_else(|| "登录已取消或已结束".to_string())
+}
+
+// Register cancellation before checking state, so a cancellation between the
+// check and select cannot be missed. Dropping the future also stops an in-flight
+// request/body read; every completed response is checked again before use.
+async fn while_login_active<T>(
+    pending: &Mutex<Option<PendingOAuthState>>,
+    changed: &Notify,
+    login_id: &str,
+    operation: impl Future<Output = T>,
+) -> Result<T, String> {
+    tokio::pin!(operation);
+    loop {
+        let notified = changed.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        active_state(pending, login_id)?;
+        tokio::select! {
+            result = &mut operation => {
+                active_state(pending, login_id)?;
+                return Ok(result);
+            }
+            _ = &mut notified => {}
+        }
+    }
+}
+
+fn finish_login_in_state<T>(
+    pending: &Mutex<Option<PendingOAuthState>>,
+    login_id: &str,
+    save: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let mut state = pending
+        .lock()
+        .map_err(|_| "获取 OAuth 状态锁失败".to_string())?;
+    require_active_state(state.as_ref(), login_id)?;
+    // Saving and cancellation share this lock: a cancelled flow cannot save,
+    // and cancelling after a completed save cannot revoke that completed login.
+    let result = save()?;
+    *state = None;
+    Ok(result)
+}
+
+pub fn finish_login<T>(
+    login_id: &str,
+    save: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let result = finish_login_in_state(&PENDING_OAUTH_STATE, login_id, save);
+    OAUTH_STATE_CHANGED.notify_waiters();
+    result
 }
 
 fn generate_code_verifier() -> String {
@@ -83,9 +163,10 @@ pub fn start_login() -> Result<CursorOAuthStartResponse, String> {
         cancelled: false,
     };
 
-    if let Ok(mut pending) = PENDING_OAUTH_STATE.lock() {
-        *pending = Some(state);
-    }
+    *PENDING_OAUTH_STATE
+        .lock()
+        .map_err(|_| "获取 OAuth 状态锁失败".to_string())? = Some(state);
+    OAUTH_STATE_CHANGED.notify_waiters();
 
     logger::log_info(&format!(
         "[Cursor OAuth] 登录会话已创建: login_id={}",
@@ -101,32 +182,8 @@ pub fn start_login() -> Result<CursorOAuthStartResponse, String> {
 }
 
 pub async fn complete_login(login_id: &str) -> Result<CursorImportPayload, String> {
-    let (uuid, code_verifier) = {
-        let pending = PENDING_OAUTH_STATE
-            .lock()
-            .map_err(|_| "获取 OAuth 状态锁失败".to_string())?;
-
-        let state = pending
-            .as_ref()
-            .ok_or_else(|| "没有进行中的 Cursor 登录会话".to_string())?;
-
-        if state.login_id != login_id {
-            return Err(format!(
-                "login_id 不匹配: expected={}, got={}",
-                state.login_id, login_id
-            ));
-        }
-
-        if state.cancelled {
-            return Err("登录已取消".to_string());
-        }
-
-        if now_timestamp() > state.expires_at {
-            return Err("登录会话已过期".to_string());
-        }
-
-        (state.uuid.clone(), state.code_verifier.clone())
-    };
+    let state = active_state(&PENDING_OAUTH_STATE, login_id)?;
+    let (uuid, code_verifier) = (state.uuid, state.code_verifier);
 
     logger::log_info(&format!(
         "[Cursor OAuth] 开始轮询: login_id={}, uuid={}",
@@ -146,25 +203,16 @@ pub async fn complete_login(login_id: &str) -> Result<CursorImportPayload, Strin
     );
 
     for attempt in 0..OAUTH_MAX_POLLS {
-        {
-            let pending = PENDING_OAUTH_STATE.lock().ok();
-            if let Some(ref guard) = pending {
-                if let Some(ref state) = **guard {
-                    if state.cancelled {
-                        return Err("登录已取消".to_string());
-                    }
-                    if now_timestamp() > state.expires_at {
-                        return Err("登录会话已过期".to_string());
-                    }
-                }
-            }
-        }
-
-        let response = client
-            .get(&poll_url)
-            .header("Accept", "application/json")
-            .send()
-            .await;
+        let response = while_login_active(
+            &PENDING_OAUTH_STATE,
+            &OAUTH_STATE_CHANGED,
+            login_id,
+            client
+                .get(&poll_url)
+                .header("Accept", "application/json")
+                .send(),
+        )
+        .await?;
 
         match response {
             Ok(resp) => {
@@ -177,22 +225,24 @@ pub async fn complete_login(login_id: &str) -> Result<CursorImportPayload, Strin
                             attempt
                         ));
                     }
-                    tokio::time::sleep(std::time::Duration::from_millis(OAUTH_POLL_INTERVAL_MS))
-                        .await;
+                    wait_before_next_poll(login_id, OAUTH_POLL_INTERVAL_MS).await?;
                     continue;
                 }
 
                 if status != 200 {
                     logger::log_warn(&format!("[Cursor OAuth] 轮询返回异常状态码: {}", status));
-                    tokio::time::sleep(std::time::Duration::from_millis(OAUTH_POLL_INTERVAL_MS))
-                        .await;
+                    wait_before_next_poll(login_id, OAUTH_POLL_INTERVAL_MS).await?;
                     continue;
                 }
 
-                let body = resp
-                    .text()
-                    .await
-                    .map_err(|e| format!("读取轮询响应失败: {}", e))?;
+                let body = while_login_active(
+                    &PENDING_OAUTH_STATE,
+                    &OAUTH_STATE_CHANGED,
+                    login_id,
+                    resp.text(),
+                )
+                .await?
+                .map_err(|e| format!("读取轮询响应失败: {}", e))?;
 
                 let poll_data: PollResponse =
                     serde_json::from_str(&body).map_err(|e| format!("解析轮询响应失败: {}", e))?;
@@ -200,11 +250,8 @@ pub async fn complete_login(login_id: &str) -> Result<CursorImportPayload, Strin
                 if let (Some(access_token), Some(refresh_token)) =
                     (poll_data.access_token, poll_data.refresh_token)
                 {
-                    logger::log_info("[Cursor OAuth] 登录成功，已获取 token");
-
-                    if let Ok(mut pending) = PENDING_OAUTH_STATE.lock() {
-                        *pending = None;
-                    }
+                    active_state(&PENDING_OAUTH_STATE, login_id)?;
+                    logger::log_info("[Cursor OAuth] 已收到授权结果，等待保存前校验");
 
                     let email = poll_data
                         .auth_id
@@ -246,35 +293,172 @@ pub async fn complete_login(login_id: &str) -> Result<CursorImportPayload, Strin
                 }
 
                 logger::log_warn("[Cursor OAuth] 轮询成功但响应缺少 token");
-                tokio::time::sleep(std::time::Duration::from_millis(OAUTH_POLL_INTERVAL_MS)).await;
+                wait_before_next_poll(login_id, OAUTH_POLL_INTERVAL_MS).await?;
             }
             Err(err) => {
                 logger::log_warn(&format!("[Cursor OAuth] 轮询请求失败: {}, 将重试", err));
-                tokio::time::sleep(std::time::Duration::from_millis(OAUTH_POLL_INTERVAL_MS * 2))
-                    .await;
+                wait_before_next_poll(login_id, OAUTH_POLL_INTERVAL_MS * 2).await?;
             }
         }
     }
 
-    if let Ok(mut pending) = PENDING_OAUTH_STATE.lock() {
-        *pending = None;
-    }
+    cancel_login(Some(login_id))?;
 
     Err("Cursor 登录轮询超时，请重试".to_string())
 }
 
-pub fn cancel_login(login_id: Option<&str>) -> Result<(), String> {
-    if let Ok(mut pending) = PENDING_OAUTH_STATE.lock() {
-        if let Some(ref mut state) = *pending {
-            if login_id.is_none() || login_id == Some(state.login_id.as_str()) {
-                state.cancelled = true;
-                logger::log_info(&format!(
-                    "[Cursor OAuth] 登录已取消: login_id={}",
-                    state.login_id
-                ));
-            }
-        }
+async fn wait_before_next_poll(login_id: &str, milliseconds: u64) -> Result<(), String> {
+    while_login_active(
+        &PENDING_OAUTH_STATE,
+        &OAUTH_STATE_CHANGED,
+        login_id,
+        tokio::time::sleep(std::time::Duration::from_millis(milliseconds)),
+    )
+    .await
+}
+
+fn cancel_login_in_state(
+    pending: &Mutex<Option<PendingOAuthState>>,
+    login_id: Option<&str>,
+) -> Result<bool, String> {
+    let mut pending = pending
+        .lock()
+        .map_err(|_| "获取 OAuth 状态锁失败".to_string())?;
+    let matches = pending
+        .as_ref()
+        .is_some_and(|state| login_id.is_none() || login_id == Some(state.login_id.as_str()));
+    if matches {
         *pending = None;
     }
+    Ok(matches)
+}
+
+pub fn cancel_login(login_id: Option<&str>) -> Result<(), String> {
+    if cancel_login_in_state(&PENDING_OAUTH_STATE, login_id)? {
+        OAUTH_STATE_CHANGED.notify_waiters();
+        logger::log_info("[Cursor OAuth] 登录已取消");
+    }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    fn flow(login_id: &str) -> PendingOAuthState {
+        PendingOAuthState {
+            login_id: login_id.into(),
+            uuid: "synthetic-request".into(),
+            code_verifier: "synthetic-verifier".into(),
+            expires_at: now_timestamp() + 300,
+            cancelled: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn oauth_cancel_missing_or_replaced_flow_never_polls() {
+        for state in [None, Some(flow("new-flow"))] {
+            let pending = Mutex::new(state);
+            let changed = Notify::new();
+            let polls = AtomicUsize::new(0);
+            let result = while_login_active(&pending, &changed, "old-flow", async {
+                polls.fetch_add(1, Ordering::SeqCst);
+                "synthetic response"
+            })
+            .await;
+            assert!(result.is_err());
+            assert_eq!(polls.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn oauth_cancel_interrupts_an_in_flight_fake_poll() {
+        let pending = Arc::new(Mutex::new(Some(flow("flow"))));
+        let changed = Arc::new(Notify::new());
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let task = {
+            let pending = pending.clone();
+            let changed = changed.clone();
+            tokio::spawn(async move {
+                while_login_active(&pending, &changed, "flow", async {
+                    started.send(()).unwrap();
+                    std::future::pending::<()>().await;
+                })
+                .await
+            })
+        };
+        ready.await.unwrap();
+        assert!(cancel_login_in_state(&pending, Some("flow")).unwrap());
+        changed.notify_waiters();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(1), task)
+            .await
+            .expect("cancellation must wake a pending request")
+            .expect("fake poll task");
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn oauth_cancel_rechecks_a_ready_fake_response() {
+        let pending = Mutex::new(Some(flow("flow")));
+        let changed = Notify::new();
+        let result = while_login_active(&pending, &changed, "flow", async {
+            // Model cancellation after the request was sent but before its
+            // response can be accepted by the poller.
+            cancel_login_in_state(&pending, Some("flow")).unwrap();
+            "synthetic successful authorization response"
+        })
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn oauth_cancel_between_response_and_save_prevents_persistence() {
+        let pending = Mutex::new(Some(flow("flow")));
+        active_state(&pending, "flow").expect("response was accepted while active");
+        cancel_login_in_state(&pending, Some("flow")).unwrap();
+        let saved = AtomicBool::new(false);
+        let result = finish_login_in_state(&pending, "flow", || {
+            saved.store(true, Ordering::SeqCst);
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert!(!saved.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn oauth_cancel_stale_flow_cannot_cancel_or_save_over_new_flow() {
+        let pending = Mutex::new(Some(flow("new-flow")));
+        assert!(!cancel_login_in_state(&pending, Some("old-flow")).unwrap());
+        let saved = AtomicBool::new(false);
+        assert!(finish_login_in_state(&pending, "old-flow", || {
+            saved.store(true, Ordering::SeqCst);
+            Ok(())
+        })
+        .is_err());
+        assert!(!saved.load(Ordering::SeqCst));
+        assert!(active_state(&pending, "new-flow").is_ok());
+    }
+
+    #[test]
+    fn oauth_cancel_expired_flow_cannot_save_and_active_flow_saves_once() {
+        let mut expired = flow("expired");
+        expired.expires_at = now_timestamp();
+        let pending = Mutex::new(Some(expired));
+        assert!(finish_login_in_state(&pending, "expired", || Ok(())).is_err());
+
+        *pending.lock().unwrap() = Some(flow("active"));
+        let saves = AtomicUsize::new(0);
+        finish_login_in_state(&pending, "active", || {
+            saves.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        })
+        .unwrap();
+        assert!(finish_login_in_state(&pending, "active", || {
+            saves.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        })
+        .is_err());
+        assert_eq!(saves.load(Ordering::SeqCst), 1);
+    }
 }

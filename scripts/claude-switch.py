@@ -163,10 +163,16 @@ class Lifecycle:
             raise safe.SafeError("failed")
 
     def verify_identity(self, target):
-        self.runner.passive_metadata(target)  # Only local allowlisted metadata.
+        # The overview can display a CLI identity before Desktop has logged in.
+        # A switch receipt requires the stronger, matching Desktop identity.
+        _, organization = self.runner.passive_metadata(target)
+        if organization is None:
+            raise safe.SafeError("identity_unavailable")
 
     def verify_sessions(self, target, sessions):
-        identity = safe.read_projected_json(Path(target["configDir"]) / ".claude.json", self.runner.policy,
+        identity_path = (self.runner.policy.home / ".claude.json" if target["kind"] == "current"
+                         else Path(target["configDir"]) / ".claude.json")
+        identity = safe.read_projected_json(identity_path, self.runner.policy,
             {"oauthAccount": {"accountUuid": True, "organizationUuid": True}}).get("oauthAccount", {})
         account = safe.canonical_uuid(identity.get("accountUuid"))
         organization = safe.canonical_uuid(identity.get("organizationUuid"))

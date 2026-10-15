@@ -14,6 +14,7 @@ use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
 pub const CURRENT_PROFILE_ID: &str = "00000000-0000-4000-8000-000000000001";
+pub const PYTHON_MISSING: &str = "CLAUDE_PYTHON_MISSING";
 const HELPER_NAME: &str = "claude-local-safe-runner.py";
 const MAX_JSON_BYTES: usize = 256 * 1024;
 const MAX_PROFILES: usize = 100;
@@ -980,6 +981,49 @@ fn process_summary() -> (bool, u32, Option<String>) {
     }
 }
 
+// /usr/bin/python3 may be an Apple developer-tool launcher rather than an
+// installed interpreter. Never probe it by execution: that can open an installer.
+fn usable_python(path: &Path) -> Option<PathBuf> {
+    if path == Path::new("/usr/bin/python3") {
+        return None;
+    }
+    let resolved = fs::canonicalize(path).ok()?;
+    if resolved == Path::new("/usr/bin/python3") || !resolved.is_file() {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if fs::metadata(&resolved).ok()?.permissions().mode() & 0o111 == 0 {
+            return None;
+        }
+    }
+    Some(resolved)
+}
+
+fn installed_python() -> Result<PathBuf, String> {
+    for path in ["/opt/homebrew/bin/python3", "/usr/local/bin/python3"] {
+        if let Some(python) = usable_python(Path::new(path)) {
+            return Ok(python);
+        }
+    }
+    // --print-path is read-only and does not invoke the tool-installation UI.
+    let mut command = Command::new("/usr/bin/xcode-select");
+    command.arg("--print-path").env_clear().env("PATH", "/usr/bin:/bin");
+    if let Ok(bytes) = bounded_output(command, Duration::from_secs(3)) {
+        if let Ok(text) = std::str::from_utf8(&bytes) {
+            let developer = Path::new(text.trim());
+            if developer.is_absolute() {
+                if let Some(python) = usable_python(&developer.join("usr/bin/python3")) {
+                    return Ok(python);
+                }
+            }
+        }
+    }
+    usable_python(Path::new("/Library/Developer/CommandLineTools/usr/bin/python3"))
+        .ok_or_else(|| PYTHON_MISSING.into())
+}
+
 #[derive(Clone)]
 pub struct Runner {
     python: PathBuf,
@@ -1004,15 +1048,7 @@ impl Runner {
                     .unwrap_or(false)
             })
             .ok_or("安装包缺少 Claude 本地助手；请重新构建预览版。")?;
-        let python = [
-            "/opt/homebrew/bin/python3",
-            "/usr/local/bin/python3",
-            "/usr/bin/python3",
-        ]
-        .into_iter()
-        .map(PathBuf::from)
-        .find(|p| p.is_file())
-        .ok_or("未找到本机 Python 3。")?;
+        let python = installed_python()?;
         Ok(Self { python, script })
     }
     fn invoke<T: for<'de> Deserialize<'de>>(

@@ -10,21 +10,21 @@ macOS 上的 Codex、Cursor、Claude 账号管理器。分别登录自己的账�
 
 ### Apple Silicon：下载应用
 
-从 [Releases](https://github.com/Ayanami0730/cockpit-accounts/releases) 下载 `Cockpit-Accounts-0.1.0-macos-arm64.zip`，解压后拖到 Applications。也可在终端下载并检查安装脚本后执行：
+从 [Releases](https://github.com/Ayanami0730/cockpit-accounts/releases) 下载 `Cockpit-Accounts-0.1.1-macos-arm64.zip`，解压后拖到 Applications。也可在终端下载并检查安装脚本后执行：
 
 ```bash
-curl -fL https://raw.githubusercontent.com/Ayanami0730/cockpit-accounts/v0.1.0/scripts/install-release.sh -o /tmp/install-cockpit-accounts.sh
+curl -fL https://raw.githubusercontent.com/Ayanami0730/cockpit-accounts/v0.1.1/scripts/install-release.sh -o /tmp/install-cockpit-accounts.sh
 less /tmp/install-cockpit-accounts.sh
 bash /tmp/install-cockpit-accounts.sh
 ```
 
 脚本安装到 `~/Applications`，不需要 sudo，不自动启动应用或导入账号。已有同名应用时会停止，先退出并移走旧副本再升级。应用为 ad-hoc 签名，尚无 Apple Developer ID 公证；macOS 拦截时，在系统设置 → 隐私与安全性中检查并选择“仍要打开”。安装脚本不会关闭 Gatekeeper。
 
-要求 macOS 12 或更新版本。预编译包为 Apple Silicon；Intel 可尝试源码构建，但尚未在 Intel 硬件验收。使用 Claude 功能需要 Python 3（Apple Command Line Tools 提供）和已安装的官方 Claude Code CLI；Claude Desktop 功能还需要 `/Applications/Claude.app` 或 `~/Applications/Claude.app`。Claude 客户端自身的系统版本要求以其官方安装文档为准。
+要求 macOS 12 或更新版本。预编译包为 Apple Silicon；Intel 可尝试源码构建，但尚未在 Intel 硬件验收。使用 Claude 功能需要 Python 3.9+（Apple Command Line Tools 提供）和已安装的官方 Claude Code CLI；Claude Desktop 功能还需要 `/Applications/Claude.app` 或 `~/Applications/Claude.app`。Claude 客户端自身的系统版本要求以其官方安装文档为准。
 
 ### 从源码构建和安装
 
-先安装 Apple Command Line Tools、Node.js 22+、Python 3 和 Rust/rustup。已有 Homebrew 时可使用：
+先安装 Apple Command Line Tools、Node.js 22+、Python 3.9+ 和 Rust/rustup。已有 Homebrew 时可使用：
 
 ```bash
 xcode-select --install
@@ -47,7 +47,7 @@ rustup toolchain install 1.95.0 --profile minimal
 python3 scripts/build-local-safe.py build
 ```
 
-签名压缩包：`target/release/bundle/Cockpit-Accounts-0.1.0-macos-<架构>.zip`。打包在系统临时目录内签名，避免 iCloud 同步目录添加 Finder 属性导致签名失败；请使用压缩包中的应用。
+签名压缩包：`target/release/bundle/Cockpit-Accounts-0.1.1-macos-<架构>.zip`。打包在系统临时目录内签名，避免 iCloud 同步目录添加 Finder 属性导致签名失败；请使用压缩包中的应用。
 
 ## 添加与切换账号
 
@@ -87,4 +87,4 @@ python3 -B scripts/test_claude_switch.py
 python3 scripts/privacy-check.py
 ```
 
-本版本的具体测试记录和兼容性边界见 [验证记录](docs/VALIDATION.md)。单元测试使用合成账号与临时目录，不能代替各平台真实账号的登录验收。客户端更新可能改变认证格式或切换行为。
+本版本的具体测试记录和兼容性边界见 [验证记录](docs/ACCEPTANCE.md)。单元测试使用合成账号与临时目录，不能代替各平台真实账号的登录验收。客户端更新可能改变认证格式或切换行为。

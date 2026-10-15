@@ -40,6 +40,26 @@ function createReadonlyService(): LocalClaudeService {
   };
 }
 
+/** A successful mutation stays successful when the optional passive read fails. */
+export async function enrichSavedClaudeOverview(
+  saved: ClaudeOverview,
+  read: () => Promise<ClaudeOverview>,
+): Promise<ClaudeOverview> {
+  try {
+    const current = await read();
+    return { ...current, warning: saved.warning ?? current.warning };
+  } catch {
+    return { ...saved, warning: [saved.warning, '更改已保存，暂时无法更新登录与用量摘要；请勿重复创建账号，可稍后刷新。'].filter(Boolean).join(' ') };
+  }
+}
+
+export function claudeDependencyMessage(error: unknown): string | null {
+  const code = typeof error === 'string' ? error : error instanceof Error ? error.message : '';
+  return code === 'CLAUDE_PYTHON_MISSING'
+    ? 'Claude 功能需要已安装的 Python 3。请先安装 Python 3 或 Apple Command Line Tools，再重试；Codex 和 Cursor 不需要此依赖。'
+    : null;
+}
+
 export function createLocalClaudeService(readonly = false): LocalClaudeService {
   if (readonly) return createReadonlyService();
   const call = async <T,>(command: string, args?: Record<string, unknown>): Promise<T> => {
@@ -51,8 +71,7 @@ export function createLocalClaudeService(readonly = false): LocalClaudeService {
   // a preference cannot replace a newer Desktop sample with an older one.
   const withPassiveOverview = async (command: string, args?: Record<string, unknown>) => {
     const result = await call<ClaudeOverview>(command, args);
-    const current = await list();
-    return { ...current, warning: result.warning ?? current.warning };
+    return enrichSavedClaudeOverview(result, list);
   };
   return {
     list,

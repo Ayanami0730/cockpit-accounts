@@ -1,7 +1,7 @@
 //! Explicit IPC surface for the independent Claude companion. No legacy Claude commands.
 use crate::modules::claude_local_safe::{
     Action, ClaudeActionResult, ClaudeOverview, ClaudePreflight, Runner, SessionBackup,
-    SessionInventory, Store,
+    SessionInventory, Store, PYTHON_MISSING,
 };
 use tauri::AppHandle;
 
@@ -17,7 +17,18 @@ where
 
 #[tauri::command]
 pub async fn local_safe_claude_list(app: AppHandle) -> Result<ClaudeOverview, String> {
-    blocking(move || Runner::for_app(&app)?.cached_overview(&Store::production()?)).await
+    blocking(move || {
+        let store = Store::production()?;
+        match Runner::for_app(&app) {
+            Ok(runner) => runner.cached_overview(&store),
+            Err(error) if error == PYTHON_MISSING => {
+                let mut overview = store.overview()?;
+                overview.warning = Some("当前仅显示保存的配置。Claude 登录与用量功能需要 Python 3；请安装 Python 3 或 Apple Command Line Tools 后重试。".into());
+                Ok(overview)
+            }
+            Err(error) => Err(error),
+        }
+    }).await
 }
 
 #[tauri::command]

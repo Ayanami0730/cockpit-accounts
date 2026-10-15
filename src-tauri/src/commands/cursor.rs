@@ -157,7 +157,8 @@ pub async fn cursor_oauth_login_complete(
         login_id
     ));
     let payload = cursor_oauth::complete_login(&login_id).await?;
-    let mut account = cursor_account::upsert_account(payload)?;
+    let mut account =
+        cursor_oauth::finish_login(&login_id, || cursor_account::upsert_account(payload))?;
 
     match cursor_account::refresh_account_async(&account.id).await {
         Ok(refreshed) => account = refreshed,

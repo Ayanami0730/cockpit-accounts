@@ -205,11 +205,12 @@ export function LocalCodexPage() {
     setMessage({ kind: 'info', text: '请在浏览器里登录要添加的账号。浏览器已经登着别的号时，把链接复制到无痕窗口里打开。' });
   });
 
-  const cancelOAuth = () => {
+  const cancelOAuth = () => run('取消登录', async () => {
     const pending = oauth;
+    await invoke('local_safe_codex_oauth_cancel', { loginId: pending?.loginId ?? null });
     setOauth(null);
-    void invoke('local_safe_codex_oauth_cancel', { loginId: pending?.loginId ?? null }).catch(() => {});
-  };
+    setMessage({ kind: 'info', text: '已取消本次登录，未添加或切换账号。' });
+  });
 
   const importLocal = () => run('导入', async () => {
     const account = await invoke<LocalCodexAccount>('local_safe_codex_import_local');
@@ -287,7 +288,7 @@ export function LocalCodexPage() {
           <div className="lc-actions">
             <button className="btn btn-primary" onClick={() => void openUrl(oauth.authUrl)}>用默认浏览器打开</button>
             <button className="btn btn-secondary" onClick={() => { void navigator.clipboard.writeText(oauth.authUrl); setMessage({ kind: 'info', text: '链接已复制，可以粘到无痕窗口里。' }); }}>复制链接</button>
-            <button className="btn btn-secondary" onClick={cancelOAuth}>取消</button>
+            <button className="btn btn-secondary" disabled={!!busy} onClick={cancelOAuth}>取消</button>
           </div>
         </div>
       )}

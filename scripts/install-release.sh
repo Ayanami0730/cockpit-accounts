@@ -4,8 +4,8 @@ set -euo pipefail
 [[ "$(uname -s)" == Darwin ]] || { echo 'macOS required.' >&2; exit 1; }
 [[ "$(uname -m)" == arm64 ]] || { echo 'This release is for Apple Silicon. Intel Macs: build from source (README).' >&2; exit 1; }
 repo='Ayanami0730/cockpit-accounts'
-version='v0.1.0'
-archive='Cockpit-Accounts-0.1.0-macos-arm64.zip'
+version='v0.1.1'
+archive='Cockpit-Accounts-0.1.1-macos-arm64.zip'
 dest="$HOME/Applications/Cockpit Accounts.app"
 [[ ! -e "$dest" ]] || { echo "Already exists: $dest. Quit and move the old app aside first." >&2; exit 1; }
 task_tmp="$(mktemp -d)"
