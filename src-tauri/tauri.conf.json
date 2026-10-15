@@ -1,0 +1,116 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Cockpit Accounts",
+  "version": "0.1.0",
+  "identifier": "io.github.cockpit-accounts.desktop",
+  "build": {
+    "beforeDevCommand": "node scripts/prepare-tauri.cjs && npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "node scripts/prepare-tauri.cjs && npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Cockpit Accounts",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "center": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "transparent": false,
+        "resizable": true
+      },
+      {
+        "label": "floating-card",
+        "title": "Cockpit Tools",
+        "create": false,
+        "width": 250,
+        "height": 290,
+        "minWidth": 250,
+        "minHeight": 290,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "resizable": false,
+        "skipTaskbar": true,
+        "alwaysOnTop": false,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app"
+    ],
+    "createUpdaterArtifacts": false,
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "./windows/nsis/installer-hooks.nsh"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libsecret-tools"
+        ]
+      }
+    },
+    "icon": [
+      "icons/48x48.png",
+      "icons/32x32.png",
+      "icons/16x16.png",
+      "icons/64x64.png",
+      "icons/128x128.png",
+      "icons/256x256.png",
+      "icons/512x512.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../src/assets/icons/antigravity-menu.png": "native-menu-icons/antigravity-menu.png",
+      "../src/assets/icons/claude.png": "native-menu-icons/claude.png",
+      "../src/assets/icons/codebuddy.png": "native-menu-icons/codebuddy.png",
+      "../src/assets/icons/codex.svg": "native-menu-icons/codex.svg",
+      "../src/assets/icons/cursor-menu.png": "native-menu-icons/cursor-menu.png",
+      "../src/assets/icons/github-copilot.svg": "native-menu-icons/github-copilot.svg",
+      "../src/assets/icons/kiro-menu.png": "native-menu-icons/kiro-menu.png",
+      "../src/assets/icons/qoder.png": "native-menu-icons/qoder.png",
+      "../src/assets/icons/trae.png": "native-menu-icons/trae.png",
+      "../src/assets/icons/trae-cn.png": "native-menu-icons/trae-cn.png",
+      "../src/assets/icons/trae-solo.png": "native-menu-icons/trae-solo.png",
+      "../src/assets/icons/trae-solo-cn.png": "native-menu-icons/trae-solo-cn.png",
+      "../src/assets/icons/windsurf.svg": "native-menu-icons/windsurf.svg",
+      "../src/assets/icons/workbuddy.png": "native-menu-icons/workbuddy.png",
+      "../src/assets/icons/zed.png": "native-menu-icons/zed.png",
+      "../src/assets/icons/zcode.png": "native-menu-icons/zcode.png",
+      "../scripts/claude-local-safe-runner.py": "scripts/claude-local-safe-runner.py",
+      "../scripts/claude-local-companion.py": "scripts/claude-local-companion.py",
+      "../scripts/claude-session-vault.py": "scripts/claude-session-vault.py",
+      "../scripts/claude-switch.py": "scripts/claude-switch.py"
+    },
+    "macOS": {
+      "bundleName": "Cockpit Accounts",
+      "infoPlist": "Info.plist",
+      "minimumSystemVersion": "12.0"
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "cockpit-accounts"
+        ]
+      }
+    }
+  }
+}

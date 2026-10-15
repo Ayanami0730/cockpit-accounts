@@ -1,0 +1,52 @@
+.local-app { min-height: 100vh; color: var(--text-primary); }
+.local-titlebar { height: 40px; padding: 10px 100px; text-align: center; font-size: 12px; color: var(--text-secondary); user-select: none; }
+.local-header { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 16px 28px; border-bottom: 1px solid var(--border); }
+.local-brand { display: flex; flex-direction: column; gap: 6px; }
+.local-brand strong { font-size: 20px; }
+.local-brand span { font-size: 12px; color: var(--text-secondary); }
+.local-nav { display: flex; gap: 8px; }
+.local-build-notice { padding: 12px 28px; background: var(--bg-card); border-bottom: 1px solid var(--border); color: var(--text-secondary); font-size: 13px; line-height: 1.7; }
+.local-content { padding: 20px 28px 40px; }
+.local-content .ghcp-accounts-page { padding: 0; }
+.local-settings { max-width: 850px; margin: 0 auto; line-height: 1.8; }
+.local-settings h1 { margin: 12px 0 20px; font-size: 24px; }
+.local-settings h2 { margin: 24px 0 8px; font-size: 17px; }
+.local-settings p { margin: 8px 0; color: var(--text-secondary); }
+.local-cursor-settings { width: min(560px, calc(100vw - 32px)); }
+.local-cursor-settings .form-input { width: 100%; margin: 10px 0; }
+.local-cursor-settings .modal-body p { line-height: 1.7; color: var(--text-secondary); }
+.local-cursor-settings .modal-body .local-settings-error { color: var(--danger-color, #d33); }
+@media (max-width: 640px) {
+  .local-header { align-items: flex-start; flex-direction: column; padding: 16px; }
+  .local-build-notice { padding: 12px 16px; }
+  .local-content { padding: 16px 16px 28px; }
+}
+.lc-page { display: flex; flex-direction: column; gap: 14px; }
+.lc-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: center; }
+.lc-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.lc-options { display: flex; gap: 16px; font-size: 13px; color: var(--text-secondary); }
+.lc-options label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.lc-panel { padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-card); line-height: 1.7; font-size: 13px; }
+.lc-panel.lc-error, .lc-error-text { color: var(--danger-color, #d33); }
+.lc-url { display: block; margin: 8px 0; padding: 8px; overflow-wrap: anywhere; font-size: 12px; border-radius: 6px; background: var(--bg-secondary, rgba(127,127,127,.08)); }
+.lc-busy { font-size: 13px; }
+.lc-muted { color: var(--text-secondary); font-size: 12px; }
+.lc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
+.lc-card { display: flex; flex-direction: column; gap: 10px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-card); }
+.lc-card.lc-current { border-color: var(--accent-color, #3b82f6); box-shadow: 0 0 0 1px var(--accent-color, #3b82f6) inset; }
+.lc-email { font-weight: 600; font-size: 15px; overflow-wrap: anywhere; }
+.lc-badges { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.lc-badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); }
+.lc-badge-live { color: #16a34a; border-color: #16a34a; }
+.lc-badge-warn { color: #d97706; border-color: #d97706; }
+.lc-quota-head { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; flex-wrap: wrap; }
+.lc-bar { height: 6px; margin-top: 5px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.lc-bar-fill { height: 100%; border-radius: 3px; }
+.lc-ok { background: #16a34a; } .lc-mid { background: #d97706; } .lc-low { background: #dc2626; }
+.lc-facts { display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.lc-warn-text { color: #dc2626; font-weight: 600; } .lc-mid-text { color: #d97706; }
+.lc-credits { margin: 0; padding-left: 18px; font-size: 12px; color: var(--text-secondary); }
+.lc-danger { color: var(--danger-color, #d33); }
+.lc-plan-prolite { color: #7c3aed; border-color: #7c3aed; }
+.lc-plan-pro { color: #b45309; border-color: #b45309; font-weight: 600; }
+.lc-plan-plus { color: #2563eb; border-color: #2563eb; }
